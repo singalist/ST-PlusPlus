@@ -171,7 +171,7 @@ def init_basic_elems(args):
     head_lr_multiple = 10.0
     if args.model == 'deeplabv2':
         assert args.backbone == 'resnet101'
-        model.load_state_dict(torch.load('pretrained/deeplabv2_resnet101_coco_pretrained.pth'),strict=True)
+        model.load_state_dict(torch.load('pretrained/deeplabv2_resnet101_coco_pretrained.pth'))
         head_lr_multiple = 1.0
 
     optimizer = SGD([{'params': model.backbone.parameters(), 'lr': args.lr},
@@ -207,8 +207,8 @@ def train(model, trainloader, valloader, criterion, optimizer, args):
         for i, (img, mask) in enumerate(tbar):
             img, mask = img.cuda(), mask.cuda()
 
-            pred, feat = model(img)
-            print(pred.size())
+            pred = model(img)
+            # print(pred.size())
             loss = criterion(pred, mask)
 
             optimizer.zero_grad()
@@ -232,7 +232,7 @@ def train(model, trainloader, valloader, criterion, optimizer, args):
         with torch.no_grad():
             for img, mask, _ in tbar:
                 img = img.cuda()
-                pred, _ = model(img)
+                pred = model(img)
                 pred = torch.argmax(pred, dim=1)
 
                 metric.add_batch(pred.cpu().numpy(), mask.numpy())
@@ -275,7 +275,7 @@ def select_reliable(models, dataloader, args):
 
             preds = []
             for model in models:
-                preds.append(torch.argmax(model(img)[0], dim=1).cpu().numpy())
+                preds.append(torch.argmax(model(img), dim=1).cpu().numpy())
 
             mIOU = []
             for i in range(len(preds) - 1):

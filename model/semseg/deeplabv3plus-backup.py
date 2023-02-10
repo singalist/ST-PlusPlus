@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 
 class DeepLabV3Plus(BaseNet):
-    def __init__(self, backbone, nclass, text_dim):
+    def __init__(self, backbone, nclass):
         super(DeepLabV3Plus, self).__init__(backbone)
 
         low_level_channels = self.backbone.channels[0]
@@ -29,13 +29,6 @@ class DeepLabV3Plus(BaseNet):
 
         self.classifier = nn.Conv2d(256, nclass, 1, bias=True)
 
-        # self.projector = nn.Sequential(nn.Conv2d(256, 1024, 1, bias=True),
-        #                           nn.BatchNorm2d(1024),
-        #                           nn.ReLU(True),
-        #                           nn.Conv2d(1024,1024,1,bias=True))
-        self.projector = nn.Conv2d(256, text_dim, 1, bias=True)
-        self.text_dim = text_dim
-
     def base_forward(self, x):
         h, w = x.shape[-2:]
 
@@ -48,12 +41,11 @@ class DeepLabV3Plus(BaseNet):
 
         out = torch.cat([c1, c4], dim=1)
         out = self.fuse(out)
-        feat = self.projector(out)
 
         out = self.classifier(out)
         out = F.interpolate(out, size=(h, w), mode="bilinear", align_corners=True)
 
-        return out, feat
+        return out
 
 
 def ASPPConv(in_channels, out_channels, atrous_rate):
