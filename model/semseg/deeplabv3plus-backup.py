@@ -29,6 +29,8 @@ class DeepLabV3Plus(BaseNet):
 
         self.classifier = nn.Conv2d(256, nclass, 1, bias=True)
 
+        self.projector = nn.Conv2d
+
     def base_forward(self, x):
         h, w = x.shape[-2:]
 
