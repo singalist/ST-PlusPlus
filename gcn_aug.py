@@ -186,16 +186,30 @@ class GCN_aug(nn.Module):
         self.text_labels = text_labels.cuda()
         
     def forward(self, f, label):
-        print(f.size())
-        print(label.size())
-        fn = f / f.norm(dim=-1,keepdim=True)
-        inp = torch.cat((self.text_features, fn),dim=0)
-        A_all = gen_Aall(self.Atext, self.text_labels, label)
-        adj = gen_adj(A_all).detach()
+        bs, dim, h, w = f.size()
+        y_all = []
+        g_all = []
+        for i in bs:
+            feat = f[i]
+            mask = label[i]
+            feat = feat.permute(1,2,0).reshape(h*w, dim)
+            mask = mask.permute(1,2,0).squeeze(-1).reshape(h*w)
 
-        g = self.gnn_gc1(inp, adj)
-        g = self.gnn_relu1(g)
-        y = self.gnn_gc2(g, adj)
+            fn = feat / feat.norm(dim=-1,keepdim=True)
+            inp = torch.cat((self.text_features, fn),dim=0)
+            A_all = gen_Aall(self.Atext, self.text_labels, label)
+            adj = gen_adj(A_all).detach()
 
-        return y[self.n_texts:], g[self.n_texts:]
+            g = self.gnn_gc1(inp, adj)
+            g = self.gnn_relu1(g)
+            y = self.gnn_gc2(g, adj)
+            
+            gi = g[self.n_texts:]
+            yi = y[self.n_texts:]
+            g_all.append(gi)
+            y_all.append(yi)
+
+        g_all = torch.cat(g_all,dim=0)
+        y_all = torch.cat(y_all,dim=0)
+        return y_all, g_all
     

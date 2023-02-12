@@ -247,8 +247,6 @@ def train(model, gcn_model, trainloader, valloader, criterion, optimizer, args):
             bs, dim, h, w = feat.size()
             mask = mask.unsqueeze(1)
             mask_rescale = downscale_label_ratio(mask, h, w, 0.75, 21 if args.dataset == 'pascal' else 19)
-            feat = feat.permute(0,2,3,1).reshape(bs*h*w, dim)
-            mask_rescale = mask_rescale.permute(0,2,3,1).squeeze(-1).reshape(bs*h*w)
             emb, emb_graph = gcn_model(feat, mask_rescale)
             loss_align = criterion(emb, mask_rescale)
             emb_graph = emb_graph / emb_graph.norm(dim=-1,keepdim=True)
