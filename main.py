@@ -15,6 +15,8 @@ from torch.optim import SGD
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from lagimv2 import downscale_label_ratio
+from gcn_aug import GCN_aug
 
 MODE = None
 
@@ -44,6 +46,11 @@ def parse_args():
     parser.add_argument('--reliable-id-path', type=str)
     parser.add_argument('--plus', dest='plus', default=False, action='store_true',
                         help='whether to use ST++')
+
+    # arguments for lagimV2
+    parser.add_argument("--gcn_path", type=str, default='gcn_2layer.pt')
+    parser.add_argument("--text_model_name", type=str, default='bert')
+    parser.add_argument('--edge_ratio', type=float, default=0.002, help='ratio of edges in text graph')
 
     args = parser.parse_args()
     return args
@@ -75,7 +82,7 @@ def main(args):
     trainloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=16, drop_last=True)
 
-    model, optimizer = init_basic_elems(args)
+    model, gcn_model, optimizer = init_basic_elems(args)
     print('\nParams: %.1fM' % count_params(model))
 
     best_model, checkpoints = train(model, trainloader, valloader, criterion, optimizer, args)
@@ -102,9 +109,9 @@ def main(args):
         trainloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True,
                                  pin_memory=True, num_workers=16, drop_last=True)
 
-        model, optimizer = init_basic_elems(args)
+        model, gcn_model, optimizer = init_basic_elems(args)
 
-        train(model, trainloader, valloader, criterion, optimizer, args)
+        train(model, gcn_model, trainloader, valloader, criterion, optimizer, args)
 
         return
 
@@ -138,9 +145,9 @@ def main(args):
     trainloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=16, drop_last=True)
 
-    model, optimizer = init_basic_elems(args)
+    model, gcn_model, optimizer = init_basic_elems(args)
 
-    best_model = train(model, trainloader, valloader, criterion, optimizer, args)
+    best_model = train(model, gcn_model, trainloader, valloader, criterion, optimizer, args)
 
     # <=============================== Pseudo label unreliable images ================================>
     print('\n\n\n================> Total stage 5/6: Pseudo labeling unreliable images')
@@ -159,9 +166,9 @@ def main(args):
     trainloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=16, drop_last=True)
 
-    model, optimizer = init_basic_elems(args)
+    model, gcn_model, optimizer = init_basic_elems(args)
 
-    train(model, trainloader, valloader, criterion, optimizer, args)
+    train(model, gcn_model, trainloader, valloader, criterion, optimizer, args)
 
 
 def init_basic_elems(args):
@@ -182,10 +189,31 @@ def init_basic_elems(args):
 
     model = DataParallel(model).cuda()
 
-    return model, optimizer
+    # means, covs = build_clip_model(class_names=args.classname)
+    names = {'clip':'_clip.pt', 'clipL':'_clipL.pt','bert':'_bertL.pt', 'mT5L':'_mT5new-pred.pt'}
+    filename = './features/text/' + args.dataset + names[args.text_model_name]
+    print('using text model: ',filename)
+    text_features = text_embedding(filename)
+
+    n_classes, n_prompts, _ = text_features.size()
+    text_labels = []
+    for i in range(n_classes):
+        text_labels += [i for j in range(n_prompts)]
+    text_labels = torch.tensor(text_labels)
+
+    gcn_model = GCN_aug(text_features, text_labels, ratio=args.edge_ratio)
+    dataset_str = args.dataset
+    gcn_path = args.gcn_path+'/resnet50_'+dataset_str+'_15/resnet50_'+dataset_str+'_15_best.pkl'
+    model.load_pretrained_gcn(gcn_path)
+    print("load pretrained gcn weight from "+gcn_path)
+    gcn_model = DataParallel(gcn_model).cuda()
+    for k, v in gcn_model.named_parameters():
+        v.requires_grad = False
+
+    return model, gcn_model, optimizer
 
 
-def train(model, trainloader, valloader, criterion, optimizer, args):
+def train(model, gcn_model, trainloader, valloader, criterion, optimizer, args):
     iters = 0
     total_iters = len(trainloader) * args.epochs
 
@@ -201,28 +229,44 @@ def train(model, trainloader, valloader, criterion, optimizer, args):
               (epoch, optimizer.param_groups[0]["lr"], previous_best))
 
         model.train()
-        total_loss = 0.0
+        total_cls_loss = 0.0
+        total_align_loss = 0.0
         tbar = tqdm(trainloader)
 
         for i, (img, mask) in enumerate(tbar):
             img, mask = img.cuda(), mask.cuda()
 
-            pred, feat = model(img)
-            print(pred.size())
-            loss = criterion(pred, mask)
+            pred, feat = model(img) 
+            # pred.size(): K x 321 x 321
+            # feat.size(): 1024 x 81 x 81
+            loss_cls= criterion(pred, mask) * args.cx
+
+            bs, dim, h, w = feat.size()
+            mask_rescale = downscale_label_ratio(mask, h, w, 0.75, 21 if args.dataset == 'pascal' else 19)
+            feat = feat.permute(0,2,3,1).reshape(bs*h*w, dim)
+            mask_rescale = mask_rescale.permute(0,2,3,1).squeeze(-1).reshape(bs*h*w)
+            emb, emb_graph = gcn_model(feat, mask_rescale)
+            loss_align = criterion(emb, mask_rescale)
+            emb_graph = emb_graph / emb_graph.norm(dim=-1,keepdim=True)
+            feat = feat / feat.norm(dim=-1,keepdim=True)
+            loss_align += (feat-emb_graph.detach()).norm(p=2,keepdim=True).mean()*args.cc
+            loss_align = loss_align * args.cu
+
+            loss = loss_cls + loss_align
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item()
+            total_cls_loss += loss_cls.item()
+            total_align_loss += loss_align.item()
 
             iters += 1
             lr = args.lr * (1 - iters / total_iters) ** 0.9
             optimizer.param_groups[0]["lr"] = lr
             optimizer.param_groups[1]["lr"] = lr * 1.0 if args.model == 'deeplabv2' else lr * 10.0
 
-            tbar.set_description('Loss: %.3f' % (total_loss / (i + 1)))
+            tbar.set_description('Loss_cls: %.3f, Loss_align: %.3f' % (total_cls_loss / (i + 1), total_align_loss / (i+1)))
 
         metric = meanIOU(num_classes=21 if args.dataset == 'pascal' else 19)
 
@@ -317,6 +361,12 @@ def label(model, dataloader, args):
             pred.save('%s/%s' % (args.pseudo_mask_path, os.path.basename(id[0].split(' ')[1])))
 
             tbar.set_description('mIOU: %.2f' % (mIOU * 100.0))
+
+def text_embedding(filename):
+    all_text_features = torch.load(filename)
+    all_text_features = all_text_features[:,:20,:]
+    print(all_text_features.size())
+    return all_text_features
 
 
 if __name__ == '__main__':
