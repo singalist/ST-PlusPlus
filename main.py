@@ -51,6 +51,9 @@ def parse_args():
     parser.add_argument("--gcn_path", type=str, default='gcn_2layer.pt')
     parser.add_argument("--text_model_name", type=str, default='bert')
     parser.add_argument('--edge_ratio', type=float, default=0.002, help='ratio of edges in text graph')
+    parser.add_argument('--cx', type=float, default=1.0)
+    parser.add_argument('--cu', type=float, default=1.0)
+    parser.add_argument('--cc', type=float, default=1.0)
 
     args = parser.parse_args()
     return args
@@ -85,7 +88,7 @@ def main(args):
     model, gcn_model, optimizer = init_basic_elems(args)
     print('\nParams: %.1fM' % count_params(model))
 
-    best_model, checkpoints = train(model, trainloader, valloader, criterion, optimizer, args)
+    best_model, checkpoints = train(model, gcn_model, trainloader, valloader, criterion, optimizer, args)
 
     """
         ST framework without selective re-training
@@ -203,8 +206,8 @@ def init_basic_elems(args):
 
     gcn_model = GCN_aug(text_features, text_labels, ratio=args.edge_ratio)
     dataset_str = args.dataset
-    gcn_path = args.gcn_path+'/resnet50_'+dataset_str+'_15/resnet50_'+dataset_str+'_15_best.pkl'
-    model.load_pretrained_gcn(gcn_path)
+    gcn_path = './gcn_models/' + args.gcn_path
+    gcn_model.load_state_dict(torch.load(gcn_path,map_location=torch.device('cpu')))
     print("load pretrained gcn weight from "+gcn_path)
     gcn_model = DataParallel(gcn_model).cuda()
     for k, v in gcn_model.named_parameters():
@@ -242,6 +245,7 @@ def train(model, gcn_model, trainloader, valloader, criterion, optimizer, args):
             loss_cls= criterion(pred, mask) * args.cx
 
             bs, dim, h, w = feat.size()
+            mask = mask.unsqueeze(1)
             mask_rescale = downscale_label_ratio(mask, h, w, 0.75, 21 if args.dataset == 'pascal' else 19)
             feat = feat.permute(0,2,3,1).reshape(bs*h*w, dim)
             mask_rescale = mask_rescale.permute(0,2,3,1).squeeze(-1).reshape(bs*h*w)

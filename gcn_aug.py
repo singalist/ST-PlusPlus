@@ -186,6 +186,8 @@ class GCN_aug(nn.Module):
         self.text_labels = text_labels.cuda()
         
     def forward(self, f, label):
+        print(f.size())
+        print(label.size())
         fn = f / f.norm(dim=-1,keepdim=True)
         inp = torch.cat((self.text_features, fn),dim=0)
         A_all = gen_Aall(self.Atext, self.text_labels, label)
