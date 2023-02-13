@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F 
 from torch.nn import Parameter
 import torch.utils.model_zoo as model_zoo
 import math
@@ -184,20 +185,33 @@ class GCN_aug(nn.Module):
 
         self.Atext = gen_A2Plus(self.text_features.detach(), ratio)
         self.text_labels = text_labels.cuda()
+        self.tensor_device = self.text_labels.get_device()
         
     def forward(self, f, label):
         bs, dim, h, w = f.size()
+        #print(f.size())
+        #print(label.size()) 
+        print(f[:,0,:2,:2]) 
         y_all = []
         g_all = []
-        for i in bs:
+        for i in range(bs):
             feat = f[i]
+            #print('feat',feat)
             mask = label[i]
             feat = feat.permute(1,2,0).reshape(h*w, dim)
             mask = mask.permute(1,2,0).squeeze(-1).reshape(h*w)
-
-            fn = feat / feat.norm(dim=-1,keepdim=True)
+            fn = F.normalize(feat, dim=-1) 
+            #print(fn.get_device(), self.text_features.get_device(), self.text_labels.get_device(), self.tensor_device)
+            data_device = fn.get_device()
+            if data_device != self.tensor_device:
+                self.Atext = self.Atext.to('cuda:'+str(data_device)) 
+                self.text_features = self.text_features.to('cuda:'+str(data_device))
+                self.text_labels = self.text_labels.to('cuda:'+str(data_device))
+                self.tensor_device = data_device
+                #print('update! ', fn.get_device(), self.text_features.get_device(), self.text_labels.get_device(), self.tensor_device)
+                        
             inp = torch.cat((self.text_features, fn),dim=0)
-            A_all = gen_Aall(self.Atext, self.text_labels, label)
+            A_all = gen_Aall(self.Atext, self.text_labels, mask)
             adj = gen_adj(A_all).detach()
 
             g = self.gnn_gc1(inp, adj)
@@ -211,5 +225,5 @@ class GCN_aug(nn.Module):
 
         g_all = torch.cat(g_all,dim=0)
         y_all = torch.cat(y_all,dim=0)
-        return y_all, g_all
+        return y_all, g_all, label.permute(0,2,3,1).squeeze(-1).reshape(bs*h*w) 
     

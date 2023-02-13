@@ -10,6 +10,7 @@ import numpy as np
 import os
 from PIL import Image
 import torch
+import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss, DataParallel
 from torch.optim import SGD
 from torch.utils.data import DataLoader
@@ -243,18 +244,21 @@ def train(model, gcn_model, trainloader, valloader, criterion, optimizer, args):
             # pred.size(): K x 321 x 321
             # feat.size(): 1024 x 81 x 81
             loss_cls= criterion(pred, mask) * args.cx
-
+            
             bs, dim, h, w = feat.size()
             mask = mask.unsqueeze(1)
             mask_rescale = downscale_label_ratio(mask, h, w, 0.75, 21 if args.dataset == 'pascal' else 19)
-            emb, emb_graph = gcn_model(feat, mask_rescale)
+            emb, emb_graph, mask_rescale = gcn_model(feat, mask_rescale)
+            print(emb.size)
             loss_align = criterion(emb, mask_rescale)
-            emb_graph = emb_graph / emb_graph.norm(dim=-1,keepdim=True)
-            feat = feat / feat.norm(dim=-1,keepdim=True)
+            emb_graph = F.normalize(emb_graph, dim=-1) 
+            feat = feat.permute(0,2,3,1).reshape(bs*h*w, dim)
+            feat = F.normalize(feat, dim=-1)
             loss_align += (feat-emb_graph.detach()).norm(p=2,keepdim=True).mean()*args.cc
-            loss_align = loss_align * args.cu
-
-            loss = loss_cls + loss_align
+            loss_align = loss_align * args.cu * 0
+            print(loss_align, loss_cls) 
+            #loss = loss_cls + loss_align
+            loss = loss_cls
 
             optimizer.zero_grad()
             loss.backward()
