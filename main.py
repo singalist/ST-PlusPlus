@@ -191,7 +191,8 @@ def init_basic_elems(args):
                       'lr': args.lr * head_lr_multiple}],
                     lr=args.lr, momentum=0.9, weight_decay=1e-4)
 
-    model = DataParallel(model).cuda()
+    # model = DataParallel(model).cuda()
+    model = model.cuda()
 
     # means, covs = build_clip_model(class_names=args.classname)
     names = {'clip':'_clip.pt', 'clipL':'_clipL.pt','bert':'_bertL.pt', 'mT5L':'_mT5new-pred.pt'}
@@ -210,7 +211,8 @@ def init_basic_elems(args):
     gcn_path = './gcn_models/' + args.gcn_path
     gcn_model.load_state_dict(torch.load(gcn_path,map_location=torch.device('cpu')))
     print("load pretrained gcn weight from "+gcn_path)
-    gcn_model = DataParallel(gcn_model).cuda()
+    # gcn_model = DataParallel(gcn_model).cuda()
+    gcn_model = gcn_model.cuda()
     for k, v in gcn_model.named_parameters():
         v.requires_grad = False
 

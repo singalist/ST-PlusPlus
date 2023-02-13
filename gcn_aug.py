@@ -191,7 +191,7 @@ class GCN_aug(nn.Module):
         bs, dim, h, w = f.size()
         #print(f.size())
         #print(label.size()) 
-        print(f[:,0,:2,:2]) 
+        # print(f[:,0,:2,:2]) 
         y_all = []
         g_all = []
         for i in range(bs):
@@ -202,13 +202,13 @@ class GCN_aug(nn.Module):
             mask = mask.permute(1,2,0).squeeze(-1).reshape(h*w)
             fn = F.normalize(feat, dim=-1) 
             #print(fn.get_device(), self.text_features.get_device(), self.text_labels.get_device(), self.tensor_device)
-            data_device = fn.get_device()
-            if data_device != self.tensor_device:
-                self.Atext = self.Atext.to('cuda:'+str(data_device)) 
-                self.text_features = self.text_features.to('cuda:'+str(data_device))
-                self.text_labels = self.text_labels.to('cuda:'+str(data_device))
-                self.tensor_device = data_device
-                #print('update! ', fn.get_device(), self.text_features.get_device(), self.text_labels.get_device(), self.tensor_device)
+            # data_device = fn.get_device()
+            # if data_device != self.tensor_device:
+            #     self.Atext = self.Atext.to('cuda:'+str(data_device)) 
+            #     self.text_features = self.text_features.to('cuda:'+str(data_device))
+            #     self.text_labels = self.text_labels.to('cuda:'+str(data_device))
+            #     self.tensor_device = data_device
+            #     #print('update! ', fn.get_device(), self.text_features.get_device(), self.text_labels.get_device(), self.tensor_device)
                         
             inp = torch.cat((self.text_features, fn),dim=0)
             A_all = gen_Aall(self.Atext, self.text_labels, mask)
