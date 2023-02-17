@@ -191,8 +191,8 @@ def init_basic_elems(args):
                       'lr': args.lr * head_lr_multiple}],
                     lr=args.lr, momentum=0.9, weight_decay=1e-4)
 
-    # model = DataParallel(model).cuda()
-    model = model.cuda()
+    model = DataParallel(model).cuda()
+    #model = model.cuda()
 
     # means, covs = build_clip_model(class_names=args.classname)
     names = {'clip':'_clip.pt', 'clipL':'_clipL.pt','bert':'_bertL.pt', 'mT5L':'_mT5new-pred.pt'}
@@ -211,8 +211,8 @@ def init_basic_elems(args):
     gcn_path = './gcn_models/' + args.gcn_path
     gcn_model.load_state_dict(torch.load(gcn_path,map_location=torch.device('cpu')))
     print("load pretrained gcn weight from "+gcn_path)
-    # gcn_model = DataParallel(gcn_model).cuda()
-    gcn_model = gcn_model.cuda()
+    gcn_model = DataParallel(gcn_model).cuda()
+    #gcn_model = gcn_model.cuda()
     for k, v in gcn_model.named_parameters():
         v.requires_grad = False
 
@@ -236,7 +236,8 @@ def train(model, gcn_model, trainloader, valloader, criterion, optimizer, args):
 
         model.train()
         total_cls_loss = 0.0
-        total_align_loss = 0.0
+        total_align_loss1 = 0.0
+        total_align_loss2 = 0.0
         tbar = tqdm(trainloader)
 
         for i, (img, mask) in enumerate(tbar):
@@ -251,30 +252,30 @@ def train(model, gcn_model, trainloader, valloader, criterion, optimizer, args):
             mask = mask.unsqueeze(1)
             mask_rescale = downscale_label_ratio(mask, h, w, 0.75, 21 if args.dataset == 'pascal' else 19)
             emb, emb_graph, mask_rescale = gcn_model(feat, mask_rescale)
-            print(emb.size)
-            loss_align = criterion(emb, mask_rescale)
+            loss_align1 = criterion(emb, mask_rescale)
             emb_graph = F.normalize(emb_graph, dim=-1) 
             feat = feat.permute(0,2,3,1).reshape(bs*h*w, dim)
             feat = F.normalize(feat, dim=-1)
-            loss_align += (feat-emb_graph.detach()).norm(p=2,keepdim=True).mean()*args.cc
-            loss_align = loss_align * args.cu * 0
-            print(loss_align, loss_cls) 
-            #loss = loss_cls + loss_align
-            loss = loss_cls
+            loss_align2 = (feat-emb_graph.detach()).norm(p=2,dim=-1,keepdim=True).mean()*args.cc
+            loss_align = (loss_align1 + loss_align2) * args.cu
+            #print(loss_align, loss_cls) 
+            loss = loss_cls + loss_align
+            #loss = loss_cls
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             total_cls_loss += loss_cls.item()
-            total_align_loss += loss_align.item()
+            total_align_loss1 += loss_align1.item()
+            total_align_loss2 += loss_align2.item()
 
             iters += 1
             lr = args.lr * (1 - iters / total_iters) ** 0.9
             optimizer.param_groups[0]["lr"] = lr
             optimizer.param_groups[1]["lr"] = lr * 1.0 if args.model == 'deeplabv2' else lr * 10.0
 
-            tbar.set_description('Loss_cls: %.3f, Loss_align: %.3f' % (total_cls_loss / (i + 1), total_align_loss / (i+1)))
+            tbar.set_description('Loss_cls: %.3f, Loss_align: %.3f, %.3f' % (total_cls_loss / (i + 1), total_align_loss1 / (i+1), total_align_loss2 / (i+1)))
 
         metric = meanIOU(num_classes=21 if args.dataset == 'pascal' else 19)
 

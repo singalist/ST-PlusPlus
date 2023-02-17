@@ -1,6 +1,6 @@
 from dataset.semi import SemiDataset
 from model.semseg.deeplabv2 import DeepLabV2
-from model.semseg.deeplabv3plus import DeepLabV3Plus
+from model.semseg.deeplabv3plus_backup import DeepLabV3Plus
 from model.semseg.pspnet import PSPNet
 from utils import count_params, meanIOU, color_map
 

@@ -55,6 +55,29 @@ class DeepLabV3Plus(BaseNet):
 
         return out, feat
 
+    def forward(self, x, tta=False):
+        if not tta:
+            return self.base_forward(x)
+
+        else:
+            h, w = x.shape[-2:]
+            scales = [0.5, 0.75, 1.0, 1.5, 2.0]
+
+            final_result = None
+
+            for scale in scales:
+                cur_h, cur_w = int(h * scale), int(w * scale)
+                cur_x = F.interpolate(x, size=(cur_h, cur_w), mode='bilinear', align_corners=True)
+
+                out = F.softmax(self.base_forward(cur_x)[0], dim=1)
+                out = F.interpolate(out, (h, w), mode='bilinear', align_corners=True)
+                final_result = out if final_result is None else (final_result + out)
+
+                out = F.softmax(self.base_forward(cur_x.flip(3))[0], dim=1).flip(3)
+                out = F.interpolate(out, (h, w), mode='bilinear', align_corners=True)
+                final_result += out
+
+            return final_result
 
 def ASPPConv(in_channels, out_channels, atrous_rate):
     block = nn.Sequential(nn.Conv2d(in_channels, out_channels, 3, padding=atrous_rate,
